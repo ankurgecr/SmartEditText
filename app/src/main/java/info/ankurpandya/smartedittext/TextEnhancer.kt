@@ -3,6 +3,7 @@ package info.ankurpandya.smartedittext
 import android.content.Context
 import android.util.Log
 import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.flex.FlexDelegate
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.MappedByteBuffer
@@ -39,7 +40,10 @@ class TextEnhancer {
                         descriptor.startOffset,
                         descriptor.declaredLength
                     )
-                    interpreter = Interpreter(mapped)
+                    val options = Interpreter.Options().apply {
+                        addDelegate(FlexDelegate())
+                    }
+                    interpreter = Interpreter(mapped, options)
                     outputBuffer = ByteBuffer.allocateDirect(OUTPUT_BUFFER_SIZE)
                     // Load tokenizer just to confirm asset is available
                     context.assets.open(TOKENIZER_FILE).close()
