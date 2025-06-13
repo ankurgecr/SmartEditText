@@ -49,7 +49,7 @@ class TextEnhancer {
                     }
                     interpreter = Interpreter(mapped, options)
                     context.assets.open(TOKENIZER_FILE).use { stream ->
-                        tokenizer = HuggingFaceTokenizer.newInstance(stream, emptyMap())
+                        tokenizer = HuggingFaceTokenizer.newInstance(stream, emptyMap<String, Any>())
                     }
                     startToken = tokenizer.encode("<pad>").ids.first().toLong()
                     endToken = tokenizer.encode("</s>").ids.first().toLong()
@@ -80,7 +80,6 @@ class TextEnhancer {
             val encoding = tokenizer.encode(originalText)
             val inputIds = encoding.ids
             val attention = LongArray(inputIds.size) { 1L }
-            val runner = interpreter.getSignatureRunner("int64_serving")
             val decoded = mutableListOf(startToken)
 
             repeat(MAX_OUTPUT_TOKENS) {
@@ -89,14 +88,15 @@ class TextEnhancer {
                 val outputs = HashMap<String, Any>()
                 outputs["logits"] = Array(1) { Array(decArr.size) { FloatArray(VOCAB_SIZE) } }
 
-                runner.run(
+                interpreter.runSignature(
                     mapOf(
                         "attention_mask" to arrayOf(attention),
                         "decoder_attention_mask" to arrayOf(decMask),
                         "decoder_input_ids" to arrayOf(decArr),
                         "input_ids" to arrayOf(inputIds)
                     ),
-                    outputs
+                    outputs,
+                    "int64_serving"
                 )
 
                 val logits = (outputs["logits"] as Array<Array<FloatArray>>)[0][decArr.size - 1]
