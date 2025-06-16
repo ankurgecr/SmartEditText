@@ -3,7 +3,6 @@ package info.ankurpandya.smartedittext
 import android.content.Context
 import android.util.Log
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.InterpreterApi
 import org.tensorflow.lite.flex.FlexDelegate
 import java.io.FileInputStream
 import java.nio.MappedByteBuffer
@@ -17,11 +16,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 
-class TextEnhancer {
+class TextEnhancer(
+    var numThreads: Int = 2,
+    var currentDelegate: Int = DELEGATE_CPU,
+    private val listener: GeneratorListener? = null
+) {
 
     private val IS_OFFLINE = false
 
-    private lateinit var interpreter: Interpreter
+    private var context: Context? = null
+
+    private var interpreter: Interpreter? = null
     private lateinit var tokenizer: HuggingFaceTokenizer
     private var startToken: Long = 0
     private var endToken: Long = 0
@@ -32,33 +37,53 @@ class TextEnhancer {
         private const val TOKENIZER_FILE = "tokenizer.json"
         private const val MAX_OUTPUT_TOKENS = 32
         private const val VOCAB_SIZE = 32128
+
+        const val DELEGATE_CPU = 0
+        const val DELEGATE_GPU = 1
+        const val DELEGATE_NNAPI = 2
     }
 
     fun init(context: Context) {
+        this.context = context
         if (IS_OFFLINE) {
-            try {
-                val descriptor = context.assets.openFd(MODEL_FILE)
-                FileInputStream(descriptor.fileDescriptor).use { stream ->
-                    val mapped: MappedByteBuffer = stream.channel.map(
-                        FileChannel.MapMode.READ_ONLY,
-                        descriptor.startOffset,
-                        descriptor.declaredLength
-                    )
-                    val options = Interpreter.Options().apply {
-                        addDelegate(FlexDelegate())
+            setupTextGenerator()
+        }
+    }
+
+    fun clear() {
+        interpreter = null
+        isInitialized = false
+    }
+
+    private fun setupTextGenerator() {
+        val ctx = context ?: return
+        try {
+            val descriptor = ctx.assets.openFd(MODEL_FILE)
+            FileInputStream(descriptor.fileDescriptor).use { stream ->
+                val mapped: MappedByteBuffer = stream.channel.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    descriptor.startOffset,
+                    descriptor.declaredLength
+                )
+                val options = Interpreter.Options().apply {
+                    setNumThreads(numThreads)
+                    addDelegate(FlexDelegate())
+                    when (currentDelegate) {
+                        DELEGATE_NNAPI -> setUseNNAPI(true)
                     }
-                    interpreter = Interpreter(mapped, options)
-                    context.assets.open(TOKENIZER_FILE).use { stream ->
-                        tokenizer = HuggingFaceTokenizer.newInstance(stream, emptyMap<String, Any>())
-                    }
-                    startToken = tokenizer.encode("<pad>").ids.first().toLong()
-                    endToken = tokenizer.encode("</s>").ids.first().toLong()
-                    isInitialized = true
                 }
-            } catch (e: Exception) {
-                isInitialized = false
-                Log.e("TextEnhancer", "Offline init failed: ${e.message}")
+                interpreter = Interpreter(mapped, options)
+                ctx.assets.open(TOKENIZER_FILE).use { stream ->
+                    tokenizer = HuggingFaceTokenizer.newInstance(stream, emptyMap<String, Any>())
+                }
+                startToken = tokenizer.encode("<pad>").ids.first().toLong()
+                endToken = tokenizer.encode("</s>").ids.first().toLong()
+                isInitialized = true
             }
+        } catch (e: Exception) {
+            clear()
+            listener?.onError("Offline init failed: ${e.message}")
+            Log.e("TextEnhancer", "Offline init failed: ${e.message}")
         }
     }
 
@@ -71,7 +96,8 @@ class TextEnhancer {
     }
 
     private fun enhanceTextOffline(originalText: String, onEnhanced: (String) -> Unit) {
-        if (!isInitialized) {
+        val intr = interpreter
+        if (!isInitialized || intr == null) {
             onEnhanced.invoke(originalText)
             return
         }
@@ -88,7 +114,7 @@ class TextEnhancer {
                 val outputs = HashMap<String, Any>()
                 outputs["logits"] = Array(1) { Array(decArr.size) { FloatArray(VOCAB_SIZE) } }
 
-                interpreter.runSignature(
+                intr.runSignature(
                     mapOf(
                         "attention_mask" to arrayOf(attention),
                         "decoder_attention_mask" to arrayOf(decMask),
@@ -152,4 +178,8 @@ class TextEnhancer {
             }
         })
     }
+}
+
+interface GeneratorListener {
+    fun onError(error: String)
 }
