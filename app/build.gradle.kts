@@ -62,8 +62,10 @@ dependencies {
 
     // build.gradle (app)
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.3")
     implementation("org.tensorflow:tensorflow-lite-task-text:0.4.3")
+    implementation("ai.djl.huggingface:tokenizers:0.33.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
